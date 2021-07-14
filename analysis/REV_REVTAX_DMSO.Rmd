@@ -1,0 +1,569 @@
+---
+title: "REV vs REV_TAX vs DMSO"
+author: "Fabio Bedin | MS-Unit"
+date: "12 luglio 2021"
+output: html_document
+---
+
+```{r librerie, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(fig.align = "center", warning=FALSE, message=FALSE, fig.height=10, fig.width=10)
+library("MBQN")
+library("dplyr")
+library("tidyr")
+library("DEP")
+library("SummarizedExperiment")
+library("preprocessCore")
+library("tibble")
+library("ggplot2")
+library("enrichR")
+library("DT")
+library("stringr")
+library("patchwork")
+library("here")
+library("datapasta")
+library("ggstatsplot")
+library("UpSetR")
+library("ggrepel")
+library("visdat")
+library("naniar")
+library("gprofiler2")
+library("openxlsx")
+```
+
+```{r Custom Functions}
+
+source(here::here("code/custom_functions.R"))
+
+```
+
+```{r}
+data <- read.csv(here::here("data/proteinGroups_DMSO_REV_REV_TAX.txt"), header = TRUE,stringsAsFactors = FALSE, sep = "\t")
+
+data <- data[data$Reverse != "+" & data$Potential.contaminant != "+" & data$Only.identified.by.site != "+" & data$Peptides >= 2,]
+
+data_unique <- make_unique(data, "Gene.names", "Protein.IDs", delim = ";")
+```
+
+# PCA all samples
+
+```{r}
+expdesign <- read.table(here::here("data/expdesign.tsv"), header = T, stringsAsFactors = F)
+
+columns<-match(paste("LFQ.intensity.",expdesign$label,sep=""),colnames(data_unique))
+
+data_se <- make_se(data_unique, columns, expdesign)
+
+data_filt <- filter_missval(data_se, thr = 0)
+
+data_diff <- test_diff_BH(data_filt, type = "all")
+
+dep <- add_rejections(data_diff, alpha = 0.05, lfc = 1)
+
+results<-get_results(dep)
+
+plot_pca(dep, x = 1, y = 2, n = 500, point_size = 4, indicate = c("condition", "replicate"))
+
+```
+
+
+```{r define_cond_1}
+cond_1 <- "REV."
+
+cond_2 <- "DMSO"
+
+test<- paste(cond_1,cond_2,sep="_vs_")
+```
+
+# **Analysis** {.tabset .tabset-fade}
+
+## **`r test`** {.tabset .tabset-fade}
+
+```{r expdes_1}
+expdesign <- read.table(here::here("data/expdesign.tsv"), header = T, stringsAsFactors = F)
+
+conditions<-c(cond_1,cond_2)
+
+expdesign <- subset(expdesign, condition %in% conditions)
+
+columns<-match(paste("LFQ.intensity.",expdesign$label,sep=""),colnames(data_unique))
+
+data_se <- make_se(data_unique, columns, expdesign)
+
+data_filt_Unique <- filter_missval(data_se, thr = 0)
+
+data_filt <- filter_by_grouping(data_se, thr = 0)
+```
+
+### Proteins
+
+```{r proteins_1}
+plot_numbers_lables(data_filt_Unique)
+```
+
+### normalization
+
+```{r normalization_1}
+plot_normalization(data_filt_Unique)
+```
+
+### frequency
+
+```{r frequency_1}
+plot_frequency(data_filt_Unique)
+```
+
+### upset plot {.tabset .tabset-fade}
+
+#### `r cond_1`
+
+```{r upset_1.1}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  select(starts_with(cond_1)) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 3,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = "coral2",
+        main.bar.color  = "gray44")
+```
+
+#### `r cond_2`
+
+```{r upset_1.2}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  select(starts_with(cond_2)) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 3,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = "turquoise3",
+        main.bar.color  = "gray44")
+```
+
+#### Both
+
+```{r upset_1.3}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 6,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = rep(c("turquoise3", "coral2"), each = 3),
+        main.bar.color  = "gray44")
+```
+
+
+### DEP analysis {.tabset .tabset-fade}
+
+```{r diff_1}
+data_diff <- test_diff_BH(data_filt, type = "manual", test = test)
+
+dep <- add_rejections(data_diff, alpha = 0.05, lfc = 1)
+
+results<-get_results(dep)
+```
+
+Significant: `r results %>% filter(significant) %>% nrow()`
+
+#### PCA
+
+```{r PCA_1}
+plot_pca(dep, x = 1, y = 2, n = 500, point_size = 4, indicate = c("condition", "replicate"))
+```
+
+#### Volcano 
+
+```{r volcano_1}
+plot_volcano(dep, contrast=test, add_names=T,label_size=5,adjusted = F)
+```
+
+### Unique
+
+```{r unique_1}
+unique_pair(data_filt_Unique, conditions = conditions)
+```
+
+### CC Unique
+
+```{r}
+tab_unique <- unique_pair(data_filt_Unique, conditions = conditions, table = T)
+
+GO_name <- tab_unique %>% filter(unique_REV.) %>% pull(name)
+
+GO <- gost(query = GO_name, organism = "hsapiens", sources = "GO:CC", ordered_query = F, significant = F)
+
+gostplot(GO, capped = TRUE, interactive = TRUE)
+```
+
+
+```{r define_cond_2}
+cond_1 <- "REV."
+
+cond_2 <- "REVTAX"
+
+test<- paste(cond_1,cond_2,sep="_vs_")
+```
+
+
+## **`r test`** {.tabset .tabset-fade}
+
+```{r expdes_2}
+expdesign <- read.table(here::here("data/expdesign.tsv"), header = T, stringsAsFactors = F)
+
+conditions<-c(cond_1,cond_2)
+
+expdesign <- subset(expdesign, condition %in% conditions)
+
+columns<-match(paste("LFQ.intensity.",expdesign$label,sep=""),colnames(data_unique))
+
+data_se <- make_se(data_unique, columns, expdesign)
+
+data_filt_Unique <- filter_missval(data_se, thr = 0)
+
+data_filt <- filter_by_grouping(data_se, thr = 0)
+```
+
+### Proteins
+
+```{r proteins_2}
+plot_numbers_lables(data_filt_Unique)
+```
+
+### normalization
+
+```{r normalization_2}
+plot_normalization(data_filt_Unique)
+```
+
+### frequency
+
+```{r frequency_2}
+plot_frequency(data_filt_Unique)
+```
+
+### upset plot {.tabset .tabset-fade}
+
+#### `r cond_1`
+
+```{r upset_2.1}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  select(starts_with(cond_1)) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 3,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = "coral2",
+        main.bar.color  = "gray44")
+```
+
+#### `r cond_2`
+
+```{r upset_2.2}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  select(starts_with(cond_2)) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 3,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = "turquoise3",
+        main.bar.color  = "gray44")
+```
+
+#### Both
+
+```{r upset_2.3}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 6,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = rep(c("turquoise3", "coral2"), each = 3),
+        main.bar.color  = "gray44")
+```
+
+
+### DEP analysis {.tabset .tabset-fade}
+
+```{r diff_2}
+data_diff <- test_diff_BH(data_filt, type = "manual", test = test)
+
+dep <- add_rejections(data_diff, alpha = 0.05, lfc = 1)
+
+results<-get_results(dep)
+```
+
+Significant: `r results %>% filter(significant) %>% nrow()`
+
+#### PCA
+
+```{r PCA_2}
+plot_pca(dep, x = 1, y = 2, n = 500, point_size = 4, indicate = c("condition", "replicate"))
+```
+
+#### Volcano 
+
+```{r volcano_2}
+plot_volcano(dep, contrast=test, add_names=T,label_size=5,adjusted = F)
+```
+
+### Unique
+
+```{r unique_2}
+unique_pair(data_filt_Unique, conditions = conditions)
+```
+
+### CC Unique
+
+```{r}
+tab_unique <- unique_pair(data_filt_Unique, conditions = conditions, table = T)
+
+GO_name <- tab_unique %>% pull(name)
+
+GO <- gost(query = GO_name, organism = "hsapiens", sources = "GO:CC", ordered_query = F, significant = F)
+
+gostplot(GO, capped = TRUE, interactive = TRUE)
+```
+
+```{r define_cond_3}
+cond_1 <- "REVTAX"
+
+cond_2 <- "DMSO"
+
+test<- paste(cond_1,cond_2,sep="_vs_")
+```
+
+
+## **`r test`** {.tabset .tabset-fade}
+
+```{r expdes_3}
+expdesign <- read.table(here::here("data/expdesign.tsv"), header = T, stringsAsFactors = F)
+
+conditions<-c(cond_1,cond_2)
+
+expdesign <- subset(expdesign, condition %in% conditions)
+
+columns<-match(paste("LFQ.intensity.",expdesign$label,sep=""),colnames(data_unique))
+
+data_se <- make_se(data_unique, columns, expdesign)
+
+data_filt_Unique <- filter_missval(data_se, thr = 0)
+
+data_filt <- filter_by_grouping(data_se, thr = 0)
+```
+
+### Proteins
+
+```{r proteins_3}
+plot_numbers_lables(data_filt_Unique)
+```
+
+### normalization
+
+```{r normalization_3}
+plot_normalization(data_filt_Unique)
+```
+
+### frequency
+
+```{r frequency_3}
+plot_frequency(data_filt_Unique)
+```
+
+### upset plot {.tabset .tabset-fade}
+
+#### `r cond_1`
+
+```{r upset_3.1}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  select(starts_with(cond_1)) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 3,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = "coral2",
+        main.bar.color  = "gray44")
+```
+
+#### `r cond_2`
+
+```{r upset_3.2}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  select(starts_with(cond_2)) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 3,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = "turquoise3",
+        main.bar.color  = "gray44")
+```
+
+#### Both
+
+```{r upset_3.3}
+assay(data_filt_Unique) %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>% 
+  mutate(intensity = if_else(is.na(intensity), 0, 1)) %>% 
+  pivot_wider(names_from = samples, values_from = intensity) %>% 
+  as.data.frame() %>% 
+  upset(nsets = 6,
+        order.by = "freq",
+        keep.order = T,
+        text.scale = 2.5,
+        point.size = 4,
+        line.size = 0.5, 
+        sets.bar.color = rep(c("turquoise3", "coral2"), each = 3),
+        main.bar.color  = "gray44")
+```
+
+
+### DEP analysis {.tabset .tabset-fade}
+
+```{r diff_3}
+data_diff <- test_diff_BH(data_filt, type = "manual", test = test)
+
+dep <- add_rejections(data_diff, alpha = 0.05, lfc = 1)
+
+results<-get_results(dep)
+```
+
+Significant: `r results %>% filter(significant) %>% nrow()`
+
+#### PCA
+
+```{r PCA_3}
+plot_pca(dep, x = 1, y = 2, n = 500, point_size = 4, indicate = c("condition", "replicate"))
+```
+
+#### Volcano 
+
+```{r volcano_3}
+plot_volcano(dep, contrast=test, add_names=T,label_size=5,adjusted = F)
+```
+
+### Unique
+
+```{r unique_3}
+unique_pair(data_filt_Unique, conditions = conditions)
+```
+
+### CC Unique
+
+```{r}
+tab_unique <- unique_pair(data_filt_Unique, conditions = conditions, table = T)
+
+GO_name <- tab_unique %>% filter(unique_REVTAX) %>% pull(name)
+
+GO <- gost(query = GO_name, organism = "hsapiens", sources = "GO:CC", ordered_query = F, significant = F)
+
+gostplot(GO, capped = TRUE, interactive = TRUE)
+```
+
+# **Unique in each conditions**
+
+```{r super_unique}
+expdesign <- read.table(here::here("data/expdesign.tsv"), header = T, stringsAsFactors = F)
+
+columns<-match(paste("LFQ.intensity.",expdesign$label,sep=""),colnames(data_unique))
+
+data_se <- make_se(data_unique, columns, expdesign)
+
+data_filt <- filter_missval(data_se, thr = 0)
+
+assay(data_filt) %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  pivot_longer(!rowname, names_to = "samples", values_to = "intensity") %>%
+  mutate(intensity = case_when(is.na(intensity) ~ 0, TRUE ~ as.numeric(1))) %>%
+  group_by(rowname) %>%
+  mutate(unique = if_else(sum(intensity) == 3, T, F)) %>%
+  ungroup() %>%
+  filter(unique) %>% 
+  mutate(condition = gsub(pattern = "..$", replacement = "",x = samples)) %>% 
+  group_by(rowname, condition) %>% 
+  mutate(unique_2 = if_else(sum(intensity) == 0, F, T)) %>% 
+  ungroup() %>% 
+  mutate(unique_3 = case_when(unique_2 ~ condition)) %>% 
+  select(rowname, samples, intensity, unique_3) %>%
+  group_by(rowname) %>% 
+  fill(unique_3, .direction = "downup") %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = c(rowname, unique_3) ,names_from = samples, values_from = intensity) %>% 
+  dplyr::rename(Unique = unique_3, name = rowname) %>% 
+  select(1:2) %>%
+  as.data.frame() %>% 
+    DT::datatable(options = list(
+      columnDefs = list(list(className = 'dt-center', targets = 1:2)),
+      pageLength = 10))
+```
+
+
+## {-}
+
+
+
