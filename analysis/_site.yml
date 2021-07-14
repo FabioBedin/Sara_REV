@@ -1,10 +1,14 @@
-name: "Sara_REV"
+name: Sara_REV
 output_dir: ../docs
 navbar:
-  title: "Sara_REV"
+  title: Sara_REV
   left:
   - text: Home
     href: index.html
+  right:
+  - icon: fa-github
+    text: Source code
+    href: https://github.com/FabioBedin/Sara_REV
 output:
   workflowr::wflow_html:
     toc: yes
